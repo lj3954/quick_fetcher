@@ -187,9 +187,12 @@ pub struct Download {
 
 impl Download {
     pub fn new(url: impl AsRef<str>) -> Result<Self, DownloadError> {
-        let url = Url::parse(url.as_ref()).map_err(|_| DownloadError::URLParse)?.into();
-        Ok(Self {
-            url,
+        let url = Url::parse(url.as_ref()).map_err(|_| DownloadError::URLParse)?;
+        Ok(Self::new_from_url(url))
+    }
+    pub fn new_from_url(url: impl Into<Arc<Url>>) -> Self {
+        Self {
+            url: url.into(),
             output: None,
             directory: None,
             filename: None,
@@ -198,7 +201,7 @@ impl Download {
             preferred_threads: None,
             content_length: None,
             progress: None,
-        })
+        }
     }
     pub fn with_filename(mut self, filename: String) -> Self {
         self.filename = Some(filename);
