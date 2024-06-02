@@ -26,7 +26,7 @@ impl Chunks {
                 let begin = size * t as u64;
                 let end = min(begin + size, length);
                 log::info!("Chunk: {}-{}, t: {t}, length: {length}", begin, end);
-                Chunk { buf: Vec::new(), begin, end }
+                Chunk { buf: Vec::new(), begin, end, length }
             })
             .collect::<Vec<Chunk>>();
         Self { chunks }
@@ -85,6 +85,7 @@ pub struct Chunk {
     buf: Vec<u8>,
     begin: u64,
     end: u64,
+    length: u64,
 }
 
 impl Chunk {
@@ -95,7 +96,11 @@ impl Chunk {
         headers: Option<Arc<HeaderMap>>,
         #[cfg(feature = "render_progress")] progress: Option<indicatif::ProgressBar>,
     ) -> Result<(), DownloadError> {
-        let range = format!("bytes={}-{}", self.begin, self.end);
+        let range = if self.length == self.end {
+            format!("bytes={}-", self.begin)
+        } else {
+            format!("bytes={}-{}", self.begin, self.end)
+        };
         let mut response = client.get(url).header(RANGE, range);
         if let Some(headers) = headers {
             response = response.headers((*headers).clone());
