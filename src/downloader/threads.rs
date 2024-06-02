@@ -7,11 +7,10 @@ use reqwest::{
     Url,
 };
 use reqwest_middleware::ClientWithMiddleware;
-use std::{cmp::min, io::SeekFrom, sync::Arc};
+use std::{cmp::min, sync::Arc};
 use tokio::{
     fs::File,
-    io::{AsyncSeekExt, AsyncWriteExt},
-    spawn,
+    io::{AsyncSeekExt, AsyncWriteExt, SeekFrom},
 };
 
 pub struct Chunks {
@@ -20,7 +19,8 @@ pub struct Chunks {
 
 impl Chunks {
     pub(crate) fn new(threads: u8, length: u64) -> Self {
-        let size = length / threads as u64;
+        let t = threads as u64;
+        let size = (length + t) / t;
         let chunks = (0..threads)
             .map(|t| {
                 let begin = size * t as u64;
@@ -56,24 +56,23 @@ impl Chunks {
         if let Some(progress) = progress {
             progress.finish();
         }
+        self.chunks.sort_by_key(|chunk| chunk.begin);
         Ok(())
     }
     pub(crate) async fn save(self, output: File) -> Result<(), DownloadError> {
-        let mut futures = Vec::new();
         for chunk in self.chunks {
             let output = output.try_clone().await.map_err(DownloadError::FileError)?;
-            futures.push(spawn(chunk.save(output)));
+            chunk.save(output).await?;
         }
-        futures::future::join_all(futures)
-            .await
-            .into_iter()
-            .map(|result| result.map_err(|_| DownloadError::SaveError))
-            .collect::<Result<Vec<_>, DownloadError>>()?;
+        output.sync_all().await.map_err(DownloadError::FileError)?;
         Ok(())
     }
     #[cfg(feature = "verification")]
     pub(crate) fn verify(&self, mut checksum: Checksum) -> Result<(), DownloadError> {
-        self.chunks.iter().for_each(|chunk| checksum.update(chunk.buf.as_slice()));
+        self.chunks.iter().for_each(|chunk| {
+            let range = 0..chunk.end as usize - chunk.begin as usize;
+            checksum.update(&chunk.buf[range]);
+        });
         if checksum.verify() {
             Ok(())
         } else {
@@ -117,11 +116,14 @@ impl Chunk {
         Ok(())
     }
     async fn save(self, mut output: File) -> Result<(), DownloadError> {
-        output
+        log::debug!("Buf: {}, intended: {}", self.buf.len(), self.end - self.begin);
+        let pos = output
             .seek(SeekFrom::Start(self.begin))
             .await
             .map_err(DownloadError::FileError)?;
+        log::debug!("Seeked to {}, {}", self.begin, pos);
         output.write_all(self.buf.as_slice()).await.map_err(DownloadError::FileError)?;
+        log::debug!("Wrote to {}", self.end);
         Ok(())
     }
 }

@@ -47,6 +47,7 @@ impl Checksum {
             Hasher::Sha384(hasher) => format!("{:x}", hasher.finalize()),
             Hasher::Sha512(hasher) => format!("{:x}", hasher.finalize()),
         };
+        log::debug!("Hash: {}, Contents: {}", hash, self.contents);
         hash == self.contents
     }
 }

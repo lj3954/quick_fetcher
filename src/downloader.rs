@@ -18,9 +18,6 @@ use tokio::fs::File;
 
 const DEFAULT_RETRIES: u32 = 3;
 const DEFAULT_SIMULTANEOUS_DOWNLOADS: usize = 3;
-const DEFAULT_TOTAL_PROGRESS: &str = "{elapsed_precise} {bar:30.cyan} {human_pos:>} / {human_len} ({percent}%)";
-const DEFAULT_INDIVIDUAL_PROGRESS: &str = "{bar:30.blue/red} ({percent}%) {bytes:>12.green} / {total_bytes:<12.green} {bytes_per_sec:>13.blue} - ETA: {eta_precise}";
-const PROGRESS_LINE: &str = "━╾╴─";
 
 static CURRENT_DIR: Lazy<PathBuf> = Lazy::new(|| std::env::current_dir().unwrap());
 
@@ -47,6 +44,7 @@ impl Downloader {
     pub fn new_empty() -> Self {
         Self::new(Vec::new())
     }
+    #[cfg(feature = "render_progress")]
     pub fn with_progress(mut self, progress: Progress) -> Self {
         self.progress = Some(progress);
         self
@@ -75,6 +73,7 @@ impl Downloader {
         self.finalize_threads();
         #[cfg(feature = "render_progress")]
         let progress = self.initialize_progress();
+        #[cfg(feature = "render_progress")]
         let main = progress.and_then(|progress| progress.1);
 
         let downloads = self.downloads.into_iter().map(|download| {
@@ -182,6 +181,7 @@ pub struct Download {
     checksum: Option<verify::Checksum>,
     preferred_threads: Option<u8>,
     content_length: Option<u64>,
+    #[cfg(feature = "render_progress")]
     progress: Option<ProgressBar>,
 }
 
@@ -197,9 +197,11 @@ impl Download {
             directory: None,
             filename: None,
             headers: None,
+            #[cfg(feature = "verification")]
             checksum: None,
             preferred_threads: None,
             content_length: None,
+            #[cfg(feature = "render_progress")]
             progress: None,
         }
     }
@@ -259,6 +261,7 @@ impl Download {
             chunks.verify(checksum)?;
         }
         chunks.save(self.output.unwrap()).await?;
+
         #[cfg(feature = "render_progress")]
         if let Some(main_bar) = main_bar {
             main_bar.inc(1);
@@ -272,6 +275,7 @@ pub struct Progress {
     total: Option<ProgressStyle>,
     individual: Option<ProgressStyle>,
 }
+#[cfg(feature = "render_progress")]
 impl Default for Progress {
     fn default() -> Self {
         Self::new().with_default_total().with_default_individual()
@@ -279,18 +283,22 @@ impl Default for Progress {
 }
 #[cfg(feature = "render_progress")]
 impl Progress {
+    const DEFAULT_TOTAL_PROGRESS: &'static str = "{elapsed_precise} {bar:30.cyan} {human_pos:>} / {human_len} ({percent}%)";
+    const DEFAULT_INDIVIDUAL_PROGRESS: &'static str = "{bar:30.blue/red} ({percent}%) {bytes:>12.green} / {total_bytes:<12.green} {bytes_per_sec:>13.blue} - ETA: {eta_precise}";
+    const PROGRESS_LINE: &'static str = "━╾╴─";
+
     pub fn new() -> Self {
         Self { total: None, individual: None }
     }
     pub fn with_default_total(mut self) -> Self {
-        self.total = Some(ProgressStyle::with_template(DEFAULT_TOTAL_PROGRESS).unwrap());
+        self.total = Some(ProgressStyle::with_template(Progress::DEFAULT_TOTAL_PROGRESS).unwrap());
         self
     }
     pub fn with_default_individual(mut self) -> Self {
         self.individual = Some(
-            ProgressStyle::with_template(DEFAULT_INDIVIDUAL_PROGRESS)
+            ProgressStyle::with_template(Progress::DEFAULT_INDIVIDUAL_PROGRESS)
                 .unwrap()
-                .progress_chars(PROGRESS_LINE),
+                .progress_chars(Progress::PROGRESS_LINE),
         );
         self
     }
