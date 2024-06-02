@@ -1,9 +1,10 @@
 [package]
 name = "quick_fetcher"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 license = "GPL-3.0"
 description = "Asynchronous HTTP file downloader with support for concurrency"
+repository = "https://github.com/lj3954/quick_fetcher"
 
 [dependencies]
 tokio = { version = "1.38.0", features = ["fs"] }
