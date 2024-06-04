@@ -1,16 +1,19 @@
 #[cfg(feature = "verification")]
 use crate::downloader::verify::Checksum;
 
+#[cfg(feature = "unarchive")]
+use super::decompress::ArchiveFormat;
 use crate::error::DownloadError;
 use reqwest::{
     header::{HeaderMap, RANGE},
     Url,
 };
 use reqwest_middleware::ClientWithMiddleware;
-use std::{cmp::min, sync::Arc};
-use tokio::{
+use std::{
+    cmp::min,
     fs::File,
-    io::{AsyncSeekExt, AsyncWriteExt, SeekFrom},
+    io::{Seek, SeekFrom, Write},
+    sync::Arc,
 };
 
 pub struct Chunks {
@@ -59,13 +62,25 @@ impl Chunks {
         self.chunks.sort_by_key(|chunk| chunk.begin);
         Ok(())
     }
-    pub(crate) async fn save(self, output: File) -> Result<(), DownloadError> {
+    pub(crate) fn save(self, output: File) -> Result<(), DownloadError> {
         for chunk in self.chunks {
-            let output = output.try_clone().await.map_err(DownloadError::FileError)?;
-            chunk.save(output).await?;
+            let output = output.try_clone().map_err(DownloadError::FileError)?;
+            chunk.save(output)?;
         }
-        output.sync_all().await.map_err(DownloadError::FileError)?;
+        output.sync_all().map_err(DownloadError::FileError)?;
         Ok(())
+    }
+    #[cfg(feature = "unarchive")]
+    pub(crate) fn save_archive(self, path: Option<std::path::PathBuf>, output: File, archive_format: ArchiveFormat) -> Result<(), crate::error::ArchiveError> {
+        let mut data = self
+            .chunks
+            .iter()
+            .map(|chunk| {
+                let end = (chunk.end - chunk.begin) as usize;
+                &chunk.buf[0..end]
+            })
+            .collect::<Vec<&[u8]>>();
+        archive_format.decompress(output, path, &mut data)
     }
     #[cfg(feature = "verification")]
     pub(crate) fn verify(&self, mut checksum: Checksum) -> Result<(), DownloadError> {
@@ -96,12 +111,16 @@ impl Chunk {
         headers: Option<Arc<HeaderMap>>,
         #[cfg(feature = "render_progress")] progress: Option<indicatif::ProgressBar>,
     ) -> Result<(), DownloadError> {
-        let range = if self.length == self.end {
-            format!("bytes={}-", self.begin)
-        } else {
-            format!("bytes={}-{}", self.begin, self.end)
+        let mut response = client.get(url);
+
+        let range = match (self.begin, self.end, self.length) {
+            (0, end, length) if end == length => None,
+            (_, end, length) if end == length => Some(format!("bytes={}-", self.begin)),
+            _ => Some(format!("bytes={}-{}", self.begin, self.end)),
         };
-        let mut response = client.get(url).header(RANGE, range);
+        if let Some(range) = range {
+            response = response.header(RANGE, range);
+        }
         if let Some(headers) = headers {
             response = response.headers((*headers).clone());
         }
@@ -120,14 +139,11 @@ impl Chunk {
         }
         Ok(())
     }
-    async fn save(self, mut output: File) -> Result<(), DownloadError> {
+    fn save(self, mut output: File) -> Result<(), DownloadError> {
         log::debug!("Buf: {}, intended: {}", self.buf.len(), self.end - self.begin);
-        let pos = output
-            .seek(SeekFrom::Start(self.begin))
-            .await
-            .map_err(DownloadError::FileError)?;
+        let pos = output.seek(SeekFrom::Start(self.begin)).map_err(DownloadError::FileError)?;
         log::debug!("Seeked to {}, {}", self.begin, pos);
-        output.write_all(self.buf.as_slice()).await.map_err(DownloadError::FileError)?;
+        output.write_all(self.buf.as_slice()).map_err(DownloadError::FileError)?;
         log::debug!("Wrote to {}", self.end);
         Ok(())
     }

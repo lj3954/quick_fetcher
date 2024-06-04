@@ -8,3 +8,6 @@ pub use downloader::verify::{Checksum, CsType};
 
 #[cfg(feature = "render_progress")]
 pub use downloader::Progress;
+
+#[cfg(feature = "unarchive")]
+pub use downloader::decompress::ArchiveFormat;

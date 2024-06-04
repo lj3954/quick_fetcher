@@ -1,8 +1,12 @@
+#[cfg(feature = "unarchive")]
+pub(crate) mod decompress;
 mod threads;
 #[cfg(feature = "verification")]
 pub(crate) mod verify;
 
 use crate::error::DownloadError;
+#[cfg(feature = "unarchive")]
+use decompress::ArchiveFormat;
 use futures::{
     future,
     stream::{self, StreamExt},
@@ -13,8 +17,8 @@ use once_cell::sync::Lazy;
 use reqwest::{header::HeaderMap, Url};
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
+use std::fs::File;
 use std::{path::PathBuf, sync::Arc, time::Duration};
-use tokio::fs::File;
 
 const DEFAULT_RETRIES: u32 = 3;
 const DEFAULT_SIMULTANEOUS_DOWNLOADS: usize = 3;
@@ -131,7 +135,7 @@ impl Downloader {
     fn finalize_threads(&mut self) {
         self.downloads.iter_mut().for_each(|download| {
             if download.preferred_threads.is_none() {
-                download.preferred_threads = choose_threads(download.content_length);
+                download.preferred_threads = choose_threads(download.content_length, &download.url);
             }
         });
     }
@@ -162,7 +166,15 @@ impl Downloader {
     }
 }
 
-fn choose_threads(length: Option<u64>) -> Option<u8> {
+const SINGLETHREADED_URLS: [&str; 1] = ["cdimage.ubuntu.com"];
+
+fn choose_threads(length: Option<u64>, url: &Url) -> Option<u8> {
+    if url
+        .host_str()
+        .map_or(false, |host| SINGLETHREADED_URLS.iter().any(|&single| single == host))
+    {
+        return Some(1);
+    }
     length.map(|length| match length {
         2_000_000_000.. => 5,
         1_000_000_000.. => 4,
@@ -183,6 +195,8 @@ pub struct Download {
     content_length: Option<u64>,
     #[cfg(feature = "render_progress")]
     progress: Option<ProgressBar>,
+    #[cfg(feature = "unarchive")]
+    decompress: Option<ArchiveFormat>,
 }
 
 impl Download {
@@ -203,6 +217,8 @@ impl Download {
             content_length: None,
             #[cfg(feature = "render_progress")]
             progress: None,
+            #[cfg(feature = "unarchive")]
+            decompress: None,
         }
     }
     pub fn with_filename(mut self, filename: String) -> Self {
@@ -230,17 +246,43 @@ impl Download {
         self.preferred_threads = Some(threads);
         self
     }
+    #[cfg(feature = "unarchive")]
+    pub fn with_archive_format(mut self, format: ArchiveFormat) -> Self {
+        self.decompress = Some(format);
+        self
+    }
     async fn fill_output(&mut self) -> Result<(), DownloadError> {
         if self.output.is_none() {
-            let filename = self.filename.as_deref().unwrap_or_else(|| {
+            #[allow(unused_mut)]
+            let mut filename = self.filename.as_deref().unwrap_or_else(|| {
                 self.url
                     .path_segments()
                     .and_then(|segments| segments.last())
                     .and_then(|name| if name.is_empty() { None } else { Some(name) })
                     .unwrap_or("download")
             });
+            #[cfg(feature = "unarchive")]
+            if let Some(archive_format) = &self.decompress {
+                if matches!(
+                    archive_format,
+                    ArchiveFormat::Zip | ArchiveFormat::Tar | ArchiveFormat::TarBz2 | ArchiveFormat::TarGz | ArchiveFormat::TarXz | ArchiveFormat::TarZst
+                ) && self.filename.is_some()
+                {
+                    return Err(DownloadError::UnsupportedFileName);
+                }
+                let archive_ext = match archive_format {
+                    ArchiveFormat::Bz2 => "bz2",
+                    ArchiveFormat::Gz => "gz",
+                    ArchiveFormat::Xz => "xz",
+                    ArchiveFormat::Zst => "zst",
+                    _ => "",
+                };
+                if filename.ends_with(archive_ext) {
+                    filename = &filename[..filename.len() - archive_ext.len() - 1];
+                }
+            }
             let dir = self.directory.as_ref().unwrap_or(&*CURRENT_DIR);
-            let file = File::create_new(dir.join(filename)).await.map_err(DownloadError::FileError)?;
+            let file = File::create_new(dir.join(filename)).map_err(DownloadError::FileError)?;
             self.output = Some(file);
         }
         Ok(())
@@ -260,7 +302,15 @@ impl Download {
         if let Some(checksum) = self.checksum {
             chunks.verify(checksum)?;
         }
-        chunks.save(self.output.unwrap()).await?;
+
+        #[cfg(feature = "unarchive")]
+        if let Some(archive) = self.decompress {
+            chunks.save_archive(self.directory, self.output.unwrap(), archive)?;
+        } else {
+            chunks.save(self.output.unwrap())?;
+        }
+        #[cfg(not(feature = "unarchive"))]
+        chunks.save(self.output.unwrap())?;
 
         #[cfg(feature = "render_progress")]
         if let Some(main_bar) = main_bar {

@@ -11,6 +11,15 @@ pub enum ChecksumError {
     VerificationFailure,
 }
 
+#[cfg(feature = "unarchive")]
+#[derive(Debug, Error)]
+pub enum ArchiveError {
+    #[error("Failed to unarchive file")]
+    UnarchiveError,
+    #[error("Failed to handle archive files: {0}")]
+    FileError(#[from] std::io::Error),
+}
+
 #[derive(Debug, Error)]
 pub enum DownloadError {
     #[error("Unable to parse URL")]
@@ -29,4 +38,10 @@ pub enum DownloadError {
     InvalidChecksum,
     #[error("Unable to save to file")]
     SaveError,
+    #[cfg(feature = "unarchive")]
+    #[error("File names are unsupported for tarballs or zip archives")]
+    UnsupportedFileName,
+    #[cfg(feature = "unarchive")]
+    #[error("{0}")]
+    ArchiveError(#[from] ArchiveError),
 }

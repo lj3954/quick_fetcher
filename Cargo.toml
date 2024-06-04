@@ -1,6 +1,6 @@
 [package]
 name = "quick_fetcher"
-version = "0.2.2"
+version = "0.3.0"
 edition = "2021"
 license = "GPL-3.0"
 description = "Asynchronous HTTP file downloader with support for concurrency"
@@ -19,8 +19,16 @@ thiserror = "1.0.61"
 log = "0.4.21"
 reqwest-retry = "0.5.0"
 reqwest-middleware = "0.3.1"
+tar = { version = "0.4.40", optional = true }
+bzip2 = { version = "0.4.4", optional = true }
+liblzma = { version = "0.3.2", optional = true }
+flate2 = { version = "1.0.30", optional = true }
+zstd = { version = "0.13.1", optional = true }
+zip = { version = "2.1.2", optional = true }
+
 
 [features]
-default = ["render_progress", "verification"]
+default = ["render_progress", "verification", "unarchive"]
 render_progress = ["indicatif"]
 verification = ["md-5", "sha1", "sha2"]
+unarchive = ["tar", "bzip2", "liblzma", "flate2", "zstd", "zip"]
