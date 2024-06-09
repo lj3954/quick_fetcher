@@ -44,6 +44,4 @@ pub enum DownloadError {
     #[cfg(feature = "unarchive")]
     #[error("{0}")]
     ArchiveError(#[from] ArchiveError),
-    #[error("Unable to find redirect location")]
-    RedirectError,
 }

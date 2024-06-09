@@ -1,6 +1,6 @@
 [package]
 name = "quick_fetcher"
-version = "0.4.0"
+version = "0.3.0"
 edition = "2021"
 license = "GPL-3.0"
 description = "Asynchronous HTTP file downloader with support for concurrency"
