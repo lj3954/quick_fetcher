@@ -149,16 +149,19 @@ impl Downloader {
                 if let Some(headers) = &download.headers {
                     request = request.headers((**headers).clone());
                 }
-                let response = request.send().await.map_err(DownloadError::RequestError)?;
-                response.content_length().ok_or(DownloadError::ContentLength)
+                request.send().await.map_err(DownloadError::RequestError)
             })
             .collect::<Vec<_>>();
         let futures = future::join_all(futures).await;
         self.downloads
             .iter_mut()
             .zip(futures)
-            .map(|(download, length)| {
-                download.content_length = Some(length?);
+            .map(|(download, response)| {
+                let response = response?;
+                let length = response.content_length().ok_or(DownloadError::ContentLength)?;
+                let url = response.url().clone();
+                download.content_length = Some(length);
+                download.url = Arc::new(url);
                 Ok(())
             })
             .collect::<Result<Vec<_>, DownloadError>>()?;
