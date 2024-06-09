@@ -67,7 +67,10 @@ impl Downloader {
     }
     pub async fn start_downloads(mut self) -> Result<(), DownloadError> {
         let retries = ExponentialBackoff::builder().build_with_max_retries(self.retries);
-        let client = reqwest::ClientBuilder::new().connect_timeout(Duration::from_secs(6)).build()?;
+        let client = reqwest::ClientBuilder::new()
+            .connect_timeout(Duration::from_secs(6))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()?;
         let client = ClientBuilder::new(client)
             .with(RetryTransientMiddleware::new_with_policy(retries))
             .build();
@@ -145,20 +148,36 @@ impl Downloader {
             .downloads
             .iter()
             .map(|download| async {
-                let mut request = client.get((*download.url).clone());
-                if let Some(headers) = &download.headers {
-                    request = request.headers((**headers).clone());
-                }
-                let response = request.send().await.map_err(DownloadError::RequestError)?;
-                response.content_length().ok_or(DownloadError::ContentLength)
+                let mut url = (*download.url).clone();
+                let response = loop {
+                    let mut request = client.get(url.clone());
+                    if let Some(headers) = &download.headers {
+                        request = request.headers((**headers).clone());
+                    }
+                    let response = request.send().await.map_err(DownloadError::RequestError)?;
+                    if response.status().is_redirection() {
+                        url = response
+                            .headers()
+                            .get(reqwest::header::LOCATION)
+                            .and_then(|location| location.to_str().ok())
+                            .and_then(|location| Url::parse(location).ok())
+                            .ok_or(DownloadError::RedirectError)?;
+                    } else {
+                        break response;
+                    }
+                };
+                let len = response.content_length().ok_or(DownloadError::ContentLength)?;
+                Ok((len, url))
             })
             .collect::<Vec<_>>();
-        let futures = future::join_all(futures).await;
+        let futures: Vec<Result<(u64, Url), DownloadError>> = future::join_all(futures).await;
         self.downloads
             .iter_mut()
             .zip(futures)
             .map(|(download, length)| {
-                download.content_length = Some(length?);
+                let (length, url) = length?;
+                download.content_length = Some(length);
+                download.url = Arc::new(url);
                 Ok(())
             })
             .collect::<Result<Vec<_>, DownloadError>>()?;
