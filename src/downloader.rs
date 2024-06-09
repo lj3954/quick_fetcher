@@ -169,7 +169,7 @@ impl Downloader {
     }
 }
 
-const SINGLETHREADED_URLS: [&str; 1] = ["cdimage.ubuntu.com"];
+const SINGLETHREADED_URLS: [&str; 2] = ["cdimage.ubuntu.com", "dl.sourceforge.net"];
 
 fn choose_threads(length: Option<u64>, url: &Url) -> Option<u8> {
     if url
