@@ -174,7 +174,7 @@ const SINGLETHREADED_URLS: [&str; 2] = ["cdimage.ubuntu.com", "dl.sourceforge.ne
 fn choose_threads(length: Option<u64>, url: &Url) -> Option<u8> {
     if url
         .host_str()
-        .map_or(false, |host| SINGLETHREADED_URLS.iter().any(|&single| single == host))
+        .map_or(false, |host| SINGLETHREADED_URLS.iter().any(|&single| single.contains(host)))
     {
         return Some(1);
     }
